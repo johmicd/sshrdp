@@ -1,0 +1,73 @@
+#!/bin/sh
+
+if ! which xfreerdp > /dev/null
+then
+    echo 'xfreedrp command not found. Is freerdp installed?' >&2
+    exit 1
+fi
+
+RDP_host=$1
+
+SSH_host=$2
+shift
+shift
+
+## Determine resolution
+case "$(uname -s)" in
+   Darwin)
+			if [ -x `which system_profiler` ]; then
+				res=$(system_profiler SPDisplaysDataType | grep Resolution | cut -d ':' -f 2 | cut -d "@" -f 1 | tr -d '[[:blank:]]'|gawk 'BEGIN{minx=100000;miny=100000;}{split($1,res,"x");if (res[1] < minx){minx = res[1]} if (res[2] < miny){miny = res[2]}}END{print minx-50 "x" miny-50;}')
+				resflags="-g $res"
+			else
+				resflags="-g 1390x828"
+			fi
+     ;;
+
+   Linux)
+     if [ -x `which xrandr` ]; then
+     	res=$(xrandr 2>/dev/null | grep "*" | gawk 'BEGIN{minx=100000;miny=100000;}{split($1,res,"x");if (res[1] < minx){minx = res[1]} if (res[2] < miny){miny = res[2]}}END{print minx-50 "x" miny-50;}')
+     	resflags="-g $res"
+     else
+     		resflags="-g 1024x640"
+     fi
+     ;;
+
+   # Add here more strings to compare
+   # See correspondence table at the bottom of this answer
+   *)
+     echo 'OS Unknow'
+     exit 2 
+     ;;
+esac
+
+
+defaultfreerdpopts="$resflags -d BU -u `whoami` --plugin cliprdr"
+
+usedports=$(lsof -n -i 4TCP -s TCP:LISTEN -P| grep "^ssh" | gawk '{print $9}' | gawk 'BEGIN{FS=":"}{print $2}'| sort -n)
+
+localport=13389
+while echo $usedports | grep -q $localport ; do
+	localport=$(($localport+1))
+done
+echo "Using local port $localport"
+
+## Setup SSH Tunnel
+
+ssh -L $localport:$RDP_host:3389 -N $SSH_host &
+sshpid=$!
+echo "SSH PID: $sshpid"
+
+echo -n "Waiting for ssh tunnel..."
+#while ! netstat --protocol=inet -t -n -a | grep -i listen | gawk '{print $4}' | gawk 'BEGIN{FS=":"}{print $2}' | grep -q $localport ; do
+while ! lsof -n -i 4TCP:$localport -s TCP:LISTEN -P |  grep -q "^ssh" ; do	
+	sleep 1
+done
+echo "connected"
+
+## RDP
+
+echo "Connecting to $RDP_host via ssh tunnel using xfreerdp" 
+echo "now running: xfreerdp --sec nla --certificate-name $defaultfreerdpopts -T $RDP_host $@ localhost:$localport"
+xfreerdp --sec nla --certificate-name $RDP_host $defaultfreerdpopts -T $RDP_host $@ localhost:$localport 
+
+kill $sshpid
