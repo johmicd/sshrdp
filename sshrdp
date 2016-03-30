@@ -67,7 +67,6 @@ echo "connected"
 ## RDP
 
 echo "Connecting to $RDP_host via ssh tunnel using xfreerdp" 
-echo "now running: xfreerdp --sec nla --certificate-name $defaultfreerdpopts -T $RDP_host $@ localhost:$localport"
 xfreerdp --sec nla --certificate-name $RDP_host $defaultfreerdpopts -T $RDP_host $@ localhost:$localport 
 
 kill $sshpid
