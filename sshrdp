@@ -1,20 +1,26 @@
 #!/bin/sh
-
-if ! which xfreerdp > /dev/null
+if [ $# -lt 2 ]
 then
-    echo 'xfreedrp command not found. Is freerdp installed?' >&2
-    exit 1
+        echo "Usage : $0 need to have RDP host and SSH tunnel"
+        exit
 fi
-
-RDP_host=$1
-
+RDP_STRING=$1
 SSH_host=$2
 shift
 shift
 
+default_RDP_domain="BU"
+default_RDP_username=$(whoami)
+defaultfreerdpopts="--plugin cliprdr"
+
 ## Determine resolution
 case "$(uname -s)" in
    Darwin)
+    if ! which xfreerdp > /dev/null
+    then
+      echo -e "xfreedrp command not found. Is freerdp installed? \nRun the folowing: brew install freerdp" >&2
+      exit 1
+    fi
 			if [ -x `which system_profiler` ]; then
 				res=$(system_profiler SPDisplaysDataType | grep Resolution | cut -d ':' -f 2 | cut -d "@" -f 1 | tr -d '[[:blank:]]'|gawk 'BEGIN{minx=100000;miny=100000;}{split($1,res,"x");if (res[1] < minx){minx = res[1]} if (res[2] < miny){miny = res[2]}}END{print minx-50 "x" miny-50;}')
 				resflags="-g $res"
@@ -22,8 +28,12 @@ case "$(uname -s)" in
 				resflags="-g 1390x828"
 			fi
      ;;
-
    Linux)
+    if ! which xfreerdp > /dev/null
+    then
+      echo -e "xfreedrp command not found. Is freerdp installed? \nRun the folowing: yum -y install freerdp" >&2
+      exit 1
+    fi
      if [ -x `which xrandr` ]; then
      	res=$(xrandr 2>/dev/null | grep "*" | gawk 'BEGIN{minx=100000;miny=100000;}{split($1,res,"x");if (res[1] < minx){minx = res[1]} if (res[2] < miny){miny = res[2]}}END{print minx-50 "x" miny-50;}')
      	resflags="-g $res"
@@ -31,17 +41,29 @@ case "$(uname -s)" in
      		resflags="-g 1024x640"
      fi
      ;;
-
    # Add here more strings to compare
-   # See correspondence table at the bottom of this answer
    *)
      echo 'OS Unknow'
      exit 2 
      ;;
 esac
 
+echo "$RDP_STRING"
 
-defaultfreerdpopts="$resflags -d BU -u `whoami` --plugin cliprdr"
+if [[ "$RDP_STRING" == *@* ]]; then
+  RDP_username=$(echo "$RDP_STRING" | awk -F "@" '{print $1}')
+  RDP_host=$(echo "$RDP_STRING" | awk -F "@" '{print $2}') 
+  if [[ "$RDP_username" == *\\* ]]; then 
+    RDP_domain=$(echo "$RDP_username" | awk -F "\\" '{print $1}') 
+    RDP_username=$(echo "$RDP_username" | awk -F "\\" '{print $2}') 
+  fi
+else
+    RDP_host="$RDP_STRING"
+fi
+if [ -z "$RDP_username" ]; then RDP_username="-u $default_RDP_username"; else RDP_username="-u $RDP_username"; fi
+if [ -z "$RDP_domain" ]; then RDP_domain="-d $default_RDP_domain"; else  RDP_domain="-d $RDP_domain"; fi
+
+defaultfreerdpopts="$resflags $RDP_domain $RDP_username $defaultfreerdpopts"
 
 usedports=$(lsof -n -i 4TCP -s TCP:LISTEN -P| grep "^ssh" | gawk '{print $9}' | gawk 'BEGIN{FS=":"}{print $2}'| sort -n)
 
@@ -52,7 +74,6 @@ done
 echo "Using local port $localport"
 
 ## Setup SSH Tunnel
-
 ssh -L $localport:$RDP_host:3389 -N $SSH_host &
 sshpid=$!
 echo "SSH PID: $sshpid"
@@ -65,8 +86,6 @@ done
 echo "connected"
 
 ## RDP
-
 echo "Connecting to $RDP_host via ssh tunnel using xfreerdp" 
-xfreerdp --sec nla --certificate-name $RDP_host $defaultfreerdpopts -T $RDP_host $@ localhost:$localport 
-
+xfreerdp --sec nla --certificate-name $RDP_host $defaultfreerdpopts -T $RDP_host $@ localhost:$localport
 kill $sshpid
